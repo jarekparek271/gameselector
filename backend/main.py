@@ -60,9 +60,12 @@ async def serve_index():
 
 @app.get("/health")
 async def health():
+    API_KEY = os.getenv("TEACHER_API_KEY", "")
+    headers = {"Authorization": f"Bearer {API_KEY}"} if API_KEY else {}
+    endpoint = f"{OLLAMA_URL}/models" if API_KEY else f"{OLLAMA_URL}/api/tags"
     try:
         async with httpx.AsyncClient(timeout=5) as client:
-            r = await client.get(f"{OLLAMA_URL}/api/tags")
+            r = await client.get(endpoint, headers=headers)
             return {"status": "ok", "ollama": r.status_code == 200}
     except Exception:
         return {"status": "ok", "ollama": False}
@@ -73,6 +76,9 @@ async def recommend(req: GameRequest):
     if not req.description.strip():
         raise HTTPException(status_code=400, detail="Description cannot be empty")
 
+    API_KEY = os.getenv("TEACHER_API_KEY", "")
+    headers = {"Authorization": f"Bearer {API_KEY}"} if API_KEY else {}
+
     payload = {
         "model": OLLAMA_MODEL,
         "messages": [
@@ -80,20 +86,29 @@ async def recommend(req: GameRequest):
             {"role": "user", "content": req.description},
         ],
         "stream": False,
-        "format": "json",
     }
+
+    if API_KEY:
+        payload["response_format"] = {"type": "json_object"}
+        url = f"{OLLAMA_URL}/chat/completions"
+    else:
+        payload["format"] = "json"
+        url = f"{OLLAMA_URL}/api/chat"
 
     try:
         async with httpx.AsyncClient(timeout=120) as client:
-            r = await client.post(f"{OLLAMA_URL}/api/chat", json=payload)
+            r = await client.post(url, json=payload, headers=headers)
             r.raise_for_status()
     except httpx.ConnectError:
-        raise HTTPException(status_code=503, detail="Cannot connect to Ollama. Make sure it is running.")
+        raise HTTPException(status_code=503, detail="Cannot connect to AI. Make sure it is running.")
     except httpx.TimeoutException:
-        raise HTTPException(status_code=504, detail="Ollama timed out. The model may still be loading.")
+        raise HTTPException(status_code=504, detail="AI timed out. The model may still be loading.")
 
     data = r.json()
-    raw_text = data.get("message", {}).get("content", "")
+    if API_KEY:
+        raw_text = data.get("choices", [{}])[0].get("message", {}).get("content", "")
+    else:
+        raw_text = data.get("message", {}).get("content", "")
 
     # Try to extract JSON even if there's surrounding text
     json_match = re.search(r'\{.*\}', raw_text, re.DOTALL)
