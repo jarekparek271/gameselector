@@ -1,5 +1,6 @@
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse
 from pydantic import BaseModel
 import httpx
 import os
@@ -49,6 +50,13 @@ You MUST respond ONLY with a valid JSON object in this exact format, no other te
   ]
 }"""
 
+
+@app.get("/")
+async def serve_index():
+    import os
+    # Serve from the unified Docker container structure if it exists, otherwise local DEV structure
+    path = "frontend/index.html" if os.path.exists("frontend/index.html") else "../frontend/index.html"
+    return FileResponse(path)
 
 @app.get("/health")
 async def health():
