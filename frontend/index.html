@@ -1,0 +1,524 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>Game Picker AI</title>
+<link rel="preconnect" href="https://fonts.googleapis.com"/>
+<link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Share+Tech+Mono&family=Rajdhani:wght@400;600&display=swap" rel="stylesheet"/>
+<style>
+  :root {
+    --bg: #0a0a0f;
+    --surface: #111118;
+    --border: #1e1e2e;
+    --accent: #00ff9d;
+    --accent2: #ff2d78;
+    --accent3: #7b5ea7;
+    --text: #e0e0f0;
+    --muted: #6b6b8a;
+    --card-bg: #13131f;
+    --glow: 0 0 20px rgba(0,255,157,0.25);
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: 'Rajdhani', sans-serif;
+    min-height: 100vh;
+    overflow-x: hidden;
+  }
+
+  /* Scanline effect */
+  body::before {
+    content: '';
+    position: fixed;
+    inset: 0;
+    background: repeating-linear-gradient(
+      0deg,
+      transparent,
+      transparent 2px,
+      rgba(0,0,0,0.07) 2px,
+      rgba(0,0,0,0.07) 4px
+    );
+    pointer-events: none;
+    z-index: 999;
+  }
+
+  /* Grid background */
+  body::after {
+    content: '';
+    position: fixed;
+    inset: 0;
+    background-image:
+      linear-gradient(rgba(0,255,157,0.03) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(0,255,157,0.03) 1px, transparent 1px);
+    background-size: 40px 40px;
+    pointer-events: none;
+    z-index: 0;
+  }
+
+  .container {
+    max-width: 860px;
+    margin: 0 auto;
+    padding: 40px 24px 80px;
+    position: relative;
+    z-index: 1;
+  }
+
+  header {
+    text-align: center;
+    margin-bottom: 48px;
+  }
+
+  .logo-tag {
+    display: inline-block;
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 11px;
+    color: var(--accent);
+    letter-spacing: 4px;
+    text-transform: uppercase;
+    margin-bottom: 12px;
+    opacity: 0.8;
+  }
+
+  h1 {
+    font-family: 'Bebas Neue', cursive;
+    font-size: clamp(52px, 9vw, 96px);
+    letter-spacing: 4px;
+    line-height: 0.9;
+    background: linear-gradient(135deg, var(--accent) 0%, #00c8ff 50%, var(--accent2) 100%);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+    filter: drop-shadow(0 0 30px rgba(0,255,157,0.3));
+  }
+
+  .subtitle {
+    margin-top: 16px;
+    color: var(--muted);
+    font-size: 15px;
+    letter-spacing: 1px;
+    font-family: 'Share Tech Mono', monospace;
+  }
+
+  /* Input section */
+  .input-section {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-top: 2px solid var(--accent);
+    padding: 28px;
+    margin-bottom: 32px;
+    position: relative;
+  }
+
+  .input-section::before {
+    content: '// DESCRIBE YOUR GAME';
+    position: absolute;
+    top: -11px;
+    left: 20px;
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 10px;
+    color: var(--accent);
+    background: var(--surface);
+    padding: 0 8px;
+    letter-spacing: 2px;
+  }
+
+  .chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-bottom: 16px;
+  }
+
+  .chip {
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 11px;
+    padding: 5px 12px;
+    border: 1px solid var(--border);
+    color: var(--muted);
+    cursor: pointer;
+    transition: all 0.15s;
+    letter-spacing: 1px;
+    background: transparent;
+  }
+
+  .chip:hover {
+    border-color: var(--accent);
+    color: var(--accent);
+    background: rgba(0,255,157,0.05);
+  }
+
+  textarea {
+    width: 100%;
+    background: var(--bg);
+    border: 1px solid var(--border);
+    color: var(--text);
+    font-family: 'Rajdhani', sans-serif;
+    font-size: 17px;
+    font-weight: 600;
+    padding: 16px;
+    resize: vertical;
+    min-height: 100px;
+    outline: none;
+    transition: border-color 0.2s;
+    line-height: 1.5;
+  }
+
+  textarea:focus {
+    border-color: var(--accent);
+    box-shadow: var(--glow);
+  }
+
+  textarea::placeholder { color: var(--muted); font-weight: 400; }
+
+  .btn-row {
+    display: flex;
+    justify-content: flex-end;
+    margin-top: 16px;
+  }
+
+  button#findBtn {
+    font-family: 'Bebas Neue', cursive;
+    font-size: 20px;
+    letter-spacing: 3px;
+    padding: 12px 36px;
+    background: var(--accent);
+    color: #000;
+    border: none;
+    cursor: pointer;
+    transition: all 0.15s;
+    position: relative;
+    overflow: hidden;
+  }
+
+  button#findBtn:hover:not(:disabled) {
+    background: #fff;
+    box-shadow: 0 0 30px rgba(0,255,157,0.5);
+    transform: translateY(-1px);
+  }
+
+  button#findBtn:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+    background: var(--muted);
+  }
+
+  /* Status */
+  #status {
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 12px;
+    color: var(--accent3);
+    text-align: center;
+    min-height: 20px;
+    margin-bottom: 8px;
+    letter-spacing: 1px;
+  }
+
+  #status.error { color: var(--accent2); }
+
+  /* Loading bar */
+  .loading-bar {
+    height: 2px;
+    background: var(--border);
+    margin-bottom: 24px;
+    overflow: hidden;
+    display: none;
+  }
+
+  .loading-bar.active { display: block; }
+
+  .loading-bar::after {
+    content: '';
+    display: block;
+    height: 100%;
+    width: 40%;
+    background: linear-gradient(90deg, transparent, var(--accent), transparent);
+    animation: slide 1.2s ease-in-out infinite;
+  }
+
+  @keyframes slide {
+    0% { transform: translateX(-200%); }
+    100% { transform: translateX(350%); }
+  }
+
+  /* Results */
+  #results { display: none; }
+  #results.visible { display: block; }
+
+  .results-header {
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 11px;
+    color: var(--muted);
+    letter-spacing: 3px;
+    text-transform: uppercase;
+    margin-bottom: 16px;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+
+  .results-header::after {
+    content: '';
+    flex: 1;
+    height: 1px;
+    background: var(--border);
+  }
+
+  .games-grid {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+  }
+
+  .game-card {
+    background: var(--card-bg);
+    border: 1px solid var(--border);
+    border-left: 3px solid var(--accent);
+    padding: 20px 24px;
+    display: grid;
+    grid-template-columns: auto 1fr auto;
+    gap: 0 20px;
+    align-items: start;
+    opacity: 0;
+    transform: translateY(12px);
+    animation: fadeUp 0.4s forwards;
+    transition: border-color 0.2s, box-shadow 0.2s;
+  }
+
+  .game-card:hover {
+    border-color: var(--accent);
+    box-shadow: var(--glow), inset 0 0 40px rgba(0,255,157,0.02);
+  }
+
+  .game-card:nth-child(1) { animation-delay: 0.05s; border-left-color: var(--accent); }
+  .game-card:nth-child(2) { animation-delay: 0.12s; border-left-color: #00c8ff; }
+  .game-card:nth-child(3) { animation-delay: 0.19s; border-left-color: var(--accent3); }
+  .game-card:nth-child(4) { animation-delay: 0.26s; border-left-color: var(--accent2); }
+  .game-card:nth-child(5) { animation-delay: 0.33s; border-left-color: #f7b731; }
+
+  @keyframes fadeUp {
+    to { opacity: 1; transform: translateY(0); }
+  }
+
+  .game-num {
+    font-family: 'Bebas Neue', cursive;
+    font-size: 38px;
+    line-height: 1;
+    color: var(--border);
+    user-select: none;
+    min-width: 40px;
+  }
+
+  .game-info { min-width: 0; }
+
+  .game-title {
+    font-family: 'Bebas Neue', cursive;
+    font-size: 26px;
+    letter-spacing: 2px;
+    color: var(--text);
+    line-height: 1.1;
+    margin-bottom: 4px;
+  }
+
+  .game-why {
+    font-size: 14px;
+    color: var(--muted);
+    line-height: 1.5;
+    font-weight: 400;
+  }
+
+  .game-meta {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    align-items: flex-end;
+    min-width: 90px;
+  }
+
+  .tag {
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 10px;
+    padding: 3px 8px;
+    border: 1px solid;
+    letter-spacing: 1px;
+    white-space: nowrap;
+  }
+
+  .tag.genre { border-color: var(--accent3); color: var(--accent3); }
+  .tag.platform { border-color: var(--border); color: var(--muted); }
+
+  /* Ollama status indicator */
+  .ollama-status {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 10px;
+    color: var(--muted);
+    letter-spacing: 1px;
+    margin-bottom: 24px;
+    justify-content: flex-end;
+  }
+
+  .dot {
+    width: 7px; height: 7px;
+    border-radius: 50%;
+    background: var(--muted);
+  }
+
+  .dot.online { background: var(--accent); box-shadow: 0 0 6px var(--accent); }
+  .dot.offline { background: var(--accent2); box-shadow: 0 0 6px var(--accent2); }
+</style>
+</head>
+<body>
+<div class="container">
+
+  <header>
+    <div class="logo-tag">&#9670; AI-POWERED &#9670;</div>
+    <h1>GAME<br>PICKER</h1>
+    <p class="subtitle">// tell me what you feel like playing</p>
+  </header>
+
+  <div class="ollama-status">
+    <span class="dot" id="ollamaDot"></span>
+    <span id="ollamaLabel">CHECKING OLLAMA...</span>
+  </div>
+
+  <div class="input-section">
+    <div class="chips" id="chips">
+      <button class="chip" onclick="setChip('relaxing open world game to chill out')">CHILL OPEN WORLD</button>
+      <button class="chip" onclick="setChip('fast-paced competitive shooter with progression')">COMPETITIVE SHOOTER</button>
+      <button class="chip" onclick="setChip('deep story-driven RPG with moral choices')">STORY RPG</button>
+      <button class="chip" onclick="setChip('cozy game I can play with one hand')">COZY & CASUAL</button>
+      <button class="chip" onclick="setChip('scary horror game that is genuinely terrifying')">HORROR</button>
+      <button class="chip" onclick="setChip('strategy game with complex resource management')">STRATEGY</button>
+    </div>
+    <textarea id="input" placeholder="e.g. I want something with a great story, dark atmosphere, choices that matter, and RPG mechanics..." rows="4"></textarea>
+    <div class="btn-row">
+      <button id="findBtn" onclick="findGames()">FIND GAMES →</button>
+    </div>
+  </div>
+
+  <div id="status"></div>
+  <div class="loading-bar" id="loadingBar"></div>
+
+  <div id="results">
+    <div class="results-header">RECOMMENDATIONS</div>
+    <div class="games-grid" id="gamesList"></div>
+  </div>
+
+</div>
+
+<script>
+  const API = window.location.origin.includes('localhost') || window.location.origin.includes('127.0.0.1')
+    ? 'http://localhost:8000'
+    : '/api';
+
+  async function checkOllama() {
+    try {
+      const r = await fetch(`${API}/health`);
+      const data = await r.json();
+      const dot = document.getElementById('ollamaDot');
+      const label = document.getElementById('ollamaLabel');
+      if (data.ollama) {
+        dot.className = 'dot online';
+        label.textContent = 'OLLAMA CONNECTED';
+      } else {
+        dot.className = 'dot offline';
+        label.textContent = 'OLLAMA OFFLINE';
+      }
+    } catch {
+      document.getElementById('ollamaDot').className = 'dot offline';
+      document.getElementById('ollamaLabel').textContent = 'BACKEND OFFLINE';
+    }
+  }
+
+  function setChip(text) {
+    document.getElementById('input').value = text;
+    document.getElementById('input').focus();
+  }
+
+  function setStatus(msg, isError = false) {
+    const el = document.getElementById('status');
+    el.textContent = msg;
+    el.className = isError ? 'error' : '';
+  }
+
+  function setLoading(on) {
+    document.getElementById('loadingBar').className = on ? 'loading-bar active' : 'loading-bar';
+    document.getElementById('findBtn').disabled = on;
+  }
+
+  async function findGames() {
+    const description = document.getElementById('input').value.trim();
+    if (!description) { setStatus('⚠ Enter a description first', true); return; }
+
+    setLoading(true);
+    setStatus('> Querying AI model...');
+    document.getElementById('results').className = '';
+    document.getElementById('gamesList').innerHTML = '';
+
+    try {
+      const r = await fetch(`${API}/recommend`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ description }),
+      });
+
+      const data = await r.json();
+
+      if (!r.ok) {
+        throw new Error(data.detail || 'Unknown error');
+      }
+
+      setStatus(`> Found ${data.games.length} games`);
+      renderGames(data.games);
+
+    } catch (err) {
+      setStatus(`✗ ${err.message}`, true);
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  function renderGames(games) {
+    const list = document.getElementById('gamesList');
+    list.innerHTML = '';
+
+    games.forEach((g, i) => {
+      const card = document.createElement('div');
+      card.className = 'game-card';
+      card.innerHTML = `
+        <div class="game-num">0${i + 1}</div>
+        <div class="game-info">
+          <div class="game-title">${escHtml(g.title)}</div>
+          <div class="game-why">${escHtml(g.why)}</div>
+        </div>
+        <div class="game-meta">
+          <span class="tag genre">${escHtml(g.genre)}</span>
+          <span class="tag platform">${escHtml(g.platform)}</span>
+        </div>
+      `;
+      list.appendChild(card);
+    });
+
+    document.getElementById('results').className = 'visible';
+  }
+
+  function escHtml(str) {
+    return str.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+  }
+
+  // Enter to submit
+  document.getElementById('input').addEventListener('keydown', e => {
+    if (e.key === 'Enter' && e.ctrlKey) findGames();
+  });
+
+  checkOllama();
+  setInterval(checkOllama, 10000);
+</script>
+</body>
+</html>
