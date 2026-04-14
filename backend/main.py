@@ -18,9 +18,14 @@ db_pool = None
 @asynccontextmanager
 async def lifespan(app):
     global db_pool
-    db_pool = await asyncpg.create_pool(DATABASE_URL, min_size=2, max_size=10)
+    try:
+        db_pool = await asyncpg.create_pool(DATABASE_URL, min_size=2, max_size=10, timeout=5)
+    except Exception as e:
+        print(f"Warning: Could not connect to DB. Running without database. Error: {e}")
+        db_pool = None
     yield
-    await db_pool.close()
+    if db_pool:
+        await db_pool.close()
 
 app = FastAPI(title="Game Picker API", lifespan=lifespan)
 
@@ -54,6 +59,8 @@ class DBGame(BaseModel):
     tags: list[str]
 
 async def fetch_all_games():
+    if not db_pool:
+        return []
     rows = await db_pool.fetch("""
         SELECT g.id, g.title, gr.name AS genre, g.platform,
                g.release_year, g.description,
@@ -68,6 +75,8 @@ async def fetch_all_games():
     return [dict(r) for r in rows]
 
 async def log_search(description: str, results: list):
+    if not db_pool:
+        return
     await db_pool.execute(
         "INSERT INTO search_log (query, result_titles) VALUES ($1, $2)",
         description, results
@@ -112,11 +121,12 @@ async def serve_index():
 @app.get("/health")
 async def health():
     db_ok = False
-    try:
-        await db_pool.fetchval("SELECT 1")
-        db_ok = True
-    except Exception:
-        pass
+    if db_pool:
+        try:
+            await db_pool.fetchval("SELECT 1")
+            db_ok = True
+        except Exception:
+            pass
 
     API_KEY = os.getenv("TEACHER_API_KEY", "")
     headers = {"Authorization": f"Bearer {API_KEY}"} if API_KEY else {}
@@ -132,6 +142,8 @@ async def health():
 
 @app.get("/games", response_model=list[DBGame])
 async def list_games(genre: str | None = None, tag: str | None = None):
+    if not db_pool:
+        return []
     rows = await db_pool.fetch("""
         SELECT g.id, g.title, gr.name AS genre, g.platform,
                g.release_year, g.description,
@@ -152,16 +164,22 @@ async def list_games(genre: str | None = None, tag: str | None = None):
 
 @app.get("/genres")
 async def list_genres():
+    if not db_pool:
+        return []
     rows = await db_pool.fetch("SELECT name FROM genres ORDER BY name")
     return [r["name"] for r in rows]
 
 @app.get("/tags")
 async def list_tags():
+    if not db_pool:
+        return []
     rows = await db_pool.fetch("SELECT name FROM tags ORDER BY name")
     return [r["name"] for r in rows]
 
 @app.get("/history")
 async def search_history(limit: int = 20):
+    if not db_pool:
+        return []
     rows = await db_pool.fetch(
         "SELECT query, result_titles, searched_at FROM search_log ORDER BY searched_at DESC LIMIT $1",
         limit
@@ -174,10 +192,11 @@ async def recommend(req: GameRequest):
         raise HTTPException(status_code=400, detail="Description cannot be empty")
 
     games_db = await fetch_all_games()
-    if not games_db:
+    if not games_db and db_pool is not None:
         raise HTTPException(status_code=503, detail="Game catalog is empty — DB may not be seeded yet.")
 
-    system_prompt = SYSTEM_PROMPT.format(catalog=build_catalog_text(games_db))
+    catalog_text = build_catalog_text(games_db) if games_db else "No catalog provided. Rely on your general knowledge to suggest games."
+    system_prompt = SYSTEM_PROMPT.format(catalog=catalog_text)
 
     API_KEY = os.getenv("TEACHER_API_KEY", "")
     headers = {"Authorization": f"Bearer {API_KEY}"} if API_KEY else {}
@@ -202,6 +221,8 @@ async def recommend(req: GameRequest):
         async with httpx.AsyncClient(timeout=120) as client:
             r = await client.post(url, json=payload, headers=headers)
             r.raise_for_status()
+    except httpx.HTTPStatusError as e:
+        raise HTTPException(status_code=e.response.status_code, detail=f"AI API Error: {e.response.text}")
     except httpx.ConnectError:
         raise HTTPException(status_code=503, detail="Cannot connect to AI. Make sure it is running.")
     except httpx.TimeoutException:
