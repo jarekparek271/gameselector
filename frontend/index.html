@@ -1,10 +1,11 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<meta charset="UTF-8"/>
-<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-<title>Game Picker AI</title>
-<link rel="preconnect" href="https://fonts.googleapis.com"/>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AI Game Picker</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Share+Tech+Mono&family=Rajdhani:wght@400;600&display=swap" rel="stylesheet"/>
 <style>
   :root {
@@ -102,6 +103,14 @@
     letter-spacing: 1px;
     font-family: 'Share Tech Mono', monospace;
   }
+
+  /* tabs */
+  .tabs { display: flex; gap: 0; margin-bottom: 24px; border-bottom: 1px solid var(--border); }
+  .tab { font-family: 'Share Tech Mono', monospace; font-size: 11px; letter-spacing: 2px; padding: 10px 20px; cursor: pointer; color: var(--muted); border: none; background: transparent; border-bottom: 2px solid transparent; margin-bottom: -1px; transition: all 0.15s; }
+  .tab.active { color: var(--accent); border-bottom-color: var(--accent); }
+  .tab:hover:not(.active) { color: var(--text); }
+  .tab-panel { display: none; }
+  .tab-panel.active { display: block; }
 
   /* Input section */
   .input-section {
@@ -350,18 +359,9 @@
   .tag.genre { border-color: var(--accent3); color: var(--accent3); }
   .tag.platform { border-color: var(--border); color: var(--muted); }
 
-  /* Ollama status indicator */
-  .ollama-status {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    font-family: 'Share Tech Mono', monospace;
-    font-size: 10px;
-    color: var(--muted);
-    letter-spacing: 1px;
-    margin-bottom: 24px;
-    justify-content: flex-end;
-  }
+  /* backend status indicators */
+  .status-bar{display:flex;align-items:center;gap:16px;font-family:'Share Tech Mono',monospace;font-size:10px;color:var(--muted);letter-spacing:1px;margin-bottom:24px;justify-content:flex-end;flex-wrap:wrap;}
+  .indicator{display:flex;align-items:center;gap:6px;}
 
   .dot {
     width: 7px; height: 7px;
@@ -371,43 +371,95 @@
 
   .dot.online { background: var(--accent); box-shadow: 0 0 6px var(--accent); }
   .dot.offline { background: var(--accent2); box-shadow: 0 0 6px var(--accent2); }
+
+  /* catalog tab */
+  .filters { display: flex; gap: 10px; margin-bottom: 20px; flex-wrap: wrap; }
+  select { background: var(--surface); border: 1px solid var(--border); color: var(--text); font-family: 'Share Tech Mono', monospace; font-size: 11px; padding: 6px 12px; outline: none; cursor: pointer; }
+  select:focus { border-color: var(--accent); }
+  .catalog-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 12px; }
+  .catalog-card { background: var(--card-bg); border: 1px solid var(--border); padding: 16px; transition: border-color 0.2s; }
+  .catalog-card:hover { border-color: var(--accent3); }
+  .cat-title { font-family: 'Bebas Neue', cursive; font-size: 20px; letter-spacing: 1px; margin-bottom: 4px; }
+  .cat-meta { font-family: 'Share Tech Mono', monospace; font-size: 10px; color: var(--muted); margin-bottom: 8px; display: flex; gap: 8px; flex-wrap: wrap; }
+  .cat-desc { font-size: 13px; color: var(--muted); line-height: 1.5; margin-bottom: 10px; }
+  .cat-tags { display: flex; flex-wrap: wrap; gap: 4px; }
+  .cat-tag { font-family: 'Share Tech Mono', monospace; font-size: 9px; padding: 2px 6px; border: 1px solid var(--border); color: var(--muted); }
+  #catalogStatus { font-family: 'Share Tech Mono', monospace; font-size: 12px; color: var(--muted); text-align: center; padding: 40px 0; }
+
+  /* history tab */
+  .history-item { background: var(--card-bg); border: 1px solid var(--border); border-left: 2px solid var(--accent3); padding: 14px 18px; margin-bottom: 10px; }
+  .history-query { font-size: 15px; font-weight: 600; margin-bottom: 6px; }
+  .history-games { font-family: 'Share Tech Mono', monospace; font-size: 10px; color: var(--muted); letter-spacing: 0.5px; }
+  .history-time { font-family: 'Share Tech Mono', monospace; font-size: 10px; color: var(--border); margin-top: 6px; }
+  #historyStatus { font-family: 'Share Tech Mono', monospace; font-size: 12px; color: var(--muted); text-align: center; padding: 40px 0; }
+  
 </style>
 </head>
 <body>
-<div class="container">
 
+<div class="container">
   <header>
     <div class="logo-tag">&#9670; AI-POWERED &#9670;</div>
     <h1>GAME<br>PICKER</h1>
     <p class="subtitle">// tell me what you feel like playing</p>
   </header>
 
-  <div class="ollama-status">
-    <span class="dot" id="ollamaDot"></span>
-    <span id="ollamaLabel">CHECKING OLLAMA...</span>
+  <div class="status-bar">
+    <div class="indicator"><span class="dot" id="dotOllama"></span><span id="lblOllama">CHECKING AI...</span></div>
+    <div class="indicator"><span class="dot" id="dotDB"></span><span id="lblDB">CHECKING DB...</span></div>
   </div>
 
-  <div class="input-section">
-    <div class="chips" id="chips">
-      <button class="chip" onclick="setChip('relaxing open world game to chill out')">CHILL OPEN WORLD</button>
-      <button class="chip" onclick="setChip('fast-paced competitive shooter with progression')">COMPETITIVE SHOOTER</button>
-      <button class="chip" onclick="setChip('deep story-driven RPG with moral choices')">STORY RPG</button>
-      <button class="chip" onclick="setChip('cozy game I can play with one hand')">COZY & CASUAL</button>
-      <button class="chip" onclick="setChip('scary horror game that is genuinely terrifying')">HORROR</button>
-      <button class="chip" onclick="setChip('strategy game with complex resource management')">STRATEGY</button>
+  <div class="tabs">
+    <button class="tab active" onclick="switchTab('recommend')">RECOMMEND</button>
+    <button class="tab" onclick="switchTab('catalog')">CATALOG</button>
+    <button class="tab" onclick="switchTab('history')">HISTORY</button>
+  </div>
+
+  <!-- RECOMMEND tab -->
+  <div id="tab-recommend" class="tab-panel active">
+    
+    <div class="input-section">
+      <div class="chips" id="chips">
+        <button class="chip" onclick="setChip('relaxing open world game to chill out')">CHILL OPEN WORLD</button>
+        <button class="chip" onclick="setChip('fast-paced competitive shooter with progression')">COMPETITIVE SHOOTER</button>
+        <button class="chip" onclick="setChip('deep story-driven RPG with moral choices')">STORY RPG</button>
+        <button class="chip" onclick="setChip('cozy game I can play with one hand')">COZY & CASUAL</button>
+        <button class="chip" onclick="setChip('scary horror game that is genuinely terrifying')">HORROR</button>
+        <button class="chip" onclick="setChip('strategy game with complex resource management')">STRATEGY</button>
+      </div>
+      <textarea id="input" placeholder="e.g. I want something with a great story, dark atmosphere, choices that matter, and RPG mechanics..." rows="4"></textarea>
+      <div class="btn-row">
+        <button id="findBtn" onclick="findGames()">FIND GAMES &#10140;</button>
+      </div>
     </div>
-    <textarea id="input" placeholder="e.g. I want something with a great story, dark atmosphere, choices that matter, and RPG mechanics..." rows="4"></textarea>
-    <div class="btn-row">
-      <button id="findBtn" onclick="findGames()">FIND GAMES →</button>
+
+    <div id="status"></div>
+    <div class="loading-bar" id="loadingBar"></div>
+
+    <div id="results">
+      <div class="results-header">RECOMMENDATIONS</div>
+      <div class="games-grid" id="gamesList"></div>
     </div>
   </div>
 
-  <div id="status"></div>
-  <div class="loading-bar" id="loadingBar"></div>
+  <!-- CATALOG tab -->
+  <div id="tab-catalog" class="tab-panel">
+    <div class="filters">
+      <select id="filterGenre" onchange="loadCatalog()">
+        <option value="">ALL GENRES</option>
+      </select>
+      <select id="filterTag" onchange="loadCatalog()">
+        <option value="">ALL TAGS</option>
+      </select>
+    </div>
+    <div id="catalogStatus">Loading catalog...</div>
+    <div class="catalog-grid" id="catalogGrid"></div>
+  </div>
 
-  <div id="results">
-    <div class="results-header">RECOMMENDATIONS</div>
-    <div class="games-grid" id="gamesList"></div>
+  <!-- HISTORY tab -->
+  <div id="tab-history" class="tab-panel">
+    <div id="historyStatus">Loading history...</div>
+    <div id="historyList"></div>
   </div>
 
 </div>
@@ -417,23 +469,42 @@
     ? 'http://localhost:8000'
     : '';
 
-  async function checkOllama() {
+  function escHtml(unsafe) {
+    if (!unsafe) return '';
+    return unsafe.toString()
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;")
+      .replace(/'/g, "&#039;");
+  }
+
+  async function checkHealth() {
     try {
       const r = await fetch(`${API}/health`);
       const data = await r.json();
-      const dot = document.getElementById('ollamaDot');
-      const label = document.getElementById('ollamaLabel');
-      if (data.ollama) {
-        dot.className = 'dot online';
-        label.textContent = 'OLLAMA CONNECTED';
-      } else {
-        dot.className = 'dot offline';
-        label.textContent = 'OLLAMA OFFLINE';
-      }
+      setDot('dotOllama', 'lblOllama', data.ollama, 'AI CONNECTED', 'AI OFFLINE');
+      setDot('dotDB', 'lblDB', data.db, 'DB CONNECTED', 'DB OFFLINE');
     } catch {
-      document.getElementById('ollamaDot').className = 'dot offline';
-      document.getElementById('ollamaLabel').textContent = 'BACKEND OFFLINE';
+      setDot('dotOllama', 'lblOllama', false, '', 'BACKEND OFFLINE');
+      setDot('dotDB', 'lblDB', false, '', 'BACKEND OFFLINE');
     }
+  }
+
+  function setDot(dotId, lblId, ok, onTxt, offTxt) {
+    document.getElementById(dotId).className = 'dot ' + (ok ? 'online' : 'offline');
+    document.getElementById(lblId).textContent = ok ? onTxt : offTxt;
+  }
+
+  function switchTab(name) {
+    document.querySelectorAll('.tab').forEach((t, i) => {
+      const names = ['recommend', 'catalog', 'history'];
+      t.classList.toggle('active', names[i] === name);
+    });
+    document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
+    document.getElementById('tab-' + name).classList.add('active');
+    if (name === 'catalog') initCatalog();
+    if (name === 'history') loadHistory();
   }
 
   function setChip(text) {
@@ -454,7 +525,7 @@
 
   async function findGames() {
     const description = document.getElementById('input').value.trim();
-    if (!description) { setStatus('⚠ Enter a description first', true); return; }
+    if (!description) { setStatus('&#9888; Enter a description first', true); return; }
 
     setLoading(true);
     setStatus('> Querying AI model...');
@@ -478,7 +549,7 @@
       renderGames(data.games);
 
     } catch (err) {
-      setStatus(`✗ ${err.message}`, true);
+      setStatus(`&#10006; ${err.message}`, true);
     } finally {
       setLoading(false);
     }
@@ -504,21 +575,87 @@
       `;
       list.appendChild(card);
     });
-
     document.getElementById('results').className = 'visible';
   }
 
-  function escHtml(str) {
-    return str.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+  let catalogReady = false;
+
+  async function initCatalog() {
+    if (catalogReady) { loadCatalog(); return; }
+    const [genres, tags] = await Promise.all([
+      fetch(`${API}/genres`).then(r => r.json()).catch(() => []),
+      fetch(`${API}/tags`).then(r => r.json()).catch(() => [])
+    ]);
+    const gs = document.getElementById('filterGenre');
+    genres.forEach(g => { const o = document.createElement('option'); o.value = g; o.textContent = g.toUpperCase(); gs.appendChild(o); });
+    const ts = document.getElementById('filterTag');
+    tags.forEach(t => { const o = document.createElement('option'); o.value = t; o.textContent = t.toUpperCase(); ts.appendChild(o); });
+    catalogReady = true;
+    loadCatalog();
   }
 
-  // Enter to submit
+  async function loadCatalog() {
+    const genre = document.getElementById('filterGenre').value;
+    const tag = document.getElementById('filterTag').value;
+    document.getElementById('catalogStatus').textContent = 'Loading...';
+    document.getElementById('catalogGrid').innerHTML = '';
+    const params = new URLSearchParams();
+    if (genre) params.set('genre', genre);
+    if (tag) params.set('tag', tag);
+    try {
+      const games = await fetch(`${API}/games?${params}`).then(r => r.json());
+      document.getElementById('catalogStatus').textContent = '';
+      if (!games.length) { document.getElementById('catalogStatus').textContent = 'No games found.'; return; }
+      const grid = document.getElementById('catalogGrid');
+      games.forEach(g => {
+        const c = document.createElement('div');
+        c.className = 'catalog-card';
+        c.innerHTML = `
+          <div class="cat-title">${escHtml(g.title)}</div>
+          <div class="cat-meta">
+            <span>${escHtml(g.genre)}</span>
+            <span>${escHtml(g.platform)}</span>
+            ${g.release_year ? `<span>${g.release_year}</span>` : ''}
+          </div>
+          ${g.description ? `<div class="cat-desc">${escHtml(g.description)}</div>` : ''}
+          <div class="cat-tags">${(g.tags || []).map(t => `<span class="cat-tag">${escHtml(t)}</span>`).join('')}</div>`;
+        grid.appendChild(c);
+      });
+    } catch (e) {
+      document.getElementById('catalogStatus').textContent = 'Failed to load catalog.';
+    }
+  }
+
+  async function loadHistory() {
+    document.getElementById('historyStatus').textContent = 'Loading...';
+    document.getElementById('historyList').innerHTML = '';
+    try {
+      const rows = await fetch(`${API}/history?limit=30`).then(r => r.json());
+      document.getElementById('historyStatus').textContent = '';
+      if (!rows.length) { document.getElementById('historyStatus').textContent = 'No searches yet.'; return; }
+      const list = document.getElementById('historyList');
+      rows.forEach(row => {
+        const d = document.createElement('div');
+        d.className = 'history-item';
+        const time = new Date(row.searched_at).toLocaleString();
+        d.innerHTML = `
+          <div class="history-query">${escHtml(row.query)}</div>
+          <div class="history-games">${(row.result_titles || []).join(' | ')}</div>
+          <div class="history-time">${time}</div>`;
+        list.appendChild(d);
+      });
+    } catch {
+      document.getElementById('historyStatus').textContent = 'Failed to load history.';
+    }
+  }
+
   document.getElementById('input').addEventListener('keydown', e => {
     if (e.key === 'Enter' && e.ctrlKey) findGames();
   });
 
-  checkOllama();
-  setInterval(checkOllama, 10000);
+  checkHealth();
+  setInterval(checkHealth, 30000);
+
 </script>
 </body>
 </html>
