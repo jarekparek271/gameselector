@@ -101,16 +101,16 @@ GAME CATALOG:
 {catalog}
 
 You MUST respond ONLY with a valid JSON object in this exact format, no other text:
-{
+{{
   "games": [
-    {
+    {{
       "title": "Exact title from catalog",
       "genre": "Genre from catalog",
       "why": "One sentence why this fits the request.",
       "platform": "Platform from catalog"
-    }
+    }}
   ]
-}"""
+}}"""
 
 @app.get("/")
 async def serve_index():
