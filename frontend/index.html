@@ -539,7 +539,13 @@
         body: JSON.stringify({ description }),
       });
 
-      const data = await r.json();
+      const text = await r.text();
+      let data;
+      try {
+        data = JSON.parse(text);
+      } catch (parseErr) {
+        throw new Error(`Server returned invalid JSON: "${text.substring(0, 100)}"`);
+      }
 
       if (!r.ok) {
         throw new Error(data.detail || 'Unknown error');
