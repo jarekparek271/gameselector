@@ -20,6 +20,13 @@ async def lifespan(app):
     global db_pool
     try:
         db_pool = await asyncpg.create_pool(DATABASE_URL, min_size=2, max_size=10, timeout=5)
+        try:
+            init_file = "db/init.sql" if os.path.exists("db/init.sql") else "../db/init.sql"
+            if os.path.exists(init_file):
+                with open(init_file, "r", encoding="utf-8") as f:
+                    await db_pool.execute(f.read())
+        except Exception as seeder_err:
+            print(f"Error seeding DB: {seeder_err}")
     except Exception as e:
         print(f"Warning: Could not connect to DB. Running without database. Error: {e}")
         db_pool = None

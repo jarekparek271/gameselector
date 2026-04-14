@@ -8,6 +8,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Copy backend logic and frontend static files
 COPY backend/ backend/
 COPY frontend/ frontend/
+COPY db/ db/
 
 # Expose port (PaaS environments typically use 80, 8080 or pass PORT env var)
 EXPOSE 8080
