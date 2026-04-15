@@ -26,7 +26,34 @@ async def lifespan(app):
                 with open(init_file, "r", encoding="utf-8") as f:
                     await db_pool.execute(f.read())
         except Exception as seeder_err:
-            print(f"Error seeding DB: {seeder_err}")
+            print(f"Error seeding DB from file: {seeder_err}")
+
+        # Safe programmatic migrations in case init.sql failed
+        try:
+            await db_pool.execute("ALTER TABLE games ADD COLUMN IF NOT EXISTS description TEXT;")
+            await db_pool.execute("""
+                CREATE TABLE IF NOT EXISTS search_log (
+                    id SERIAL PRIMARY KEY,
+                    query TEXT NOT NULL,
+                    result_titles TEXT[],
+                    searched_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                );
+            """)
+            await db_pool.execute("DROP VIEW IF EXISTS v_games_full;")
+            await db_pool.execute("""
+                CREATE OR REPLACE VIEW v_games_full AS
+                SELECT g.id, g.title, g.developer, g.publisher, g.release_year, g.platform, g.rating, g.price_usd, g.description,
+                    STRING_AGG(DISTINCT gn.name, ', ' ORDER BY gn.name) AS genres,
+                    STRING_AGG(DISTINCT t.name,  ', ' ORDER BY t.name)  AS tags
+                FROM games g
+                LEFT JOIN game_genres gg ON g.id = gg.game_id
+                LEFT JOIN genres gn ON gg.genre_id = gn.id
+                LEFT JOIN game_tags gt ON g.id = gt.game_id
+                LEFT JOIN tags t ON gt.tag_id = t.id
+                GROUP BY g.id ORDER BY g.rating DESC, g.title;
+            """)
+        except Exception as mig_err:
+            print(f"Error applying safe migrations: {mig_err}")
             
         import asyncio
         asyncio.create_task(generate_missing_embeddings())
@@ -217,73 +244,70 @@ async def search_history(limit: int = 20):
     return [dict(r) for r in rows]
 
 @app.post("/recommend", response_model=GameResponse)
-async def recommend(req: GameRequest):
-    if not req.description.strip():
-        raise HTTPException(status_code=400, detail="Description cannot be empty")
-
-    query_emb = []
     try:
-        query_emb = await get_embedding(req.description)
-    except Exception as e:
-        print(f"Failed to match embeddings, using catalog fallback: {e}")
+        if not req.description.strip():
+            raise HTTPException(status_code=400, detail="Description cannot be empty")
 
-    if query_emb:
-        games_db = await fetch_similar_games(query_emb, limit=15)
-    else:
-        # Fallback if embeddings somehow fail
-        if not db_pool:
-            raise HTTPException(status_code=503, detail="Database not connected.")
-        rows = await db_pool.fetch("SELECT v.id, v.title, v.genres AS genre, v.platform, v.release_year, v.description, COALESCE(string_to_array(v.tags, ', '), '{}') AS tags FROM v_games_full v LIMIT 15")
-        games_db = [dict(r) for r in rows]
+        query_emb = []
+        try:
+            query_emb = await get_embedding(req.description)
+        except Exception as e:
+            print(f"Failed to match embeddings, using catalog fallback: {e}")
 
-    if not games_db and db_pool is not None:
-        raise HTTPException(status_code=503, detail="Game catalog is empty — DB may not be seeded yet.")
+        if query_emb:
+            games_db = await fetch_similar_games(query_emb, limit=15)
+        else:
+            if not db_pool:
+                raise HTTPException(status_code=503, detail="Database not connected.")
+            rows = await db_pool.fetch("SELECT v.id, v.title, v.genres AS genre, v.platform, v.release_year, v.description, COALESCE(string_to_array(v.tags, ', '), '{}') AS tags FROM v_games_full v LIMIT 15")
+            games_db = [dict(r) for r in rows]
 
-    catalog_text = build_catalog_text(games_db) if games_db else "No catalog provided. Rely on your general knowledge to suggest games."
-    system_prompt = SYSTEM_PROMPT.format(catalog=catalog_text)
+        if not games_db and db_pool is not None:
+            raise HTTPException(status_code=503, detail="Game catalog is empty — DB may not be seeded yet.")
 
-    API_KEY = os.getenv("OPENAI_API_KEY", os.getenv("TEACHER_API_KEY", ""))
-    headers = {"Authorization": f"Bearer {API_KEY}"} if API_KEY else {}
+        catalog_text = build_catalog_text(games_db) if games_db else "No catalog provided. Rely on your general knowledge to suggest games."
+        system_prompt = SYSTEM_PROMPT.format(catalog=catalog_text)
 
-    payload = {
-        "model": OLLAMA_MODEL,
-        "messages": [
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": req.description},
-        ],
-        "stream": False,
-    }
+        API_KEY = os.getenv("OPENAI_API_KEY", os.getenv("TEACHER_API_KEY", ""))
+        headers = {"Authorization": f"Bearer {API_KEY}"} if API_KEY else {}
 
-    if API_KEY:
-        payload["response_format"] = {"type": "json_object"}
-        url = f"{OLLAMA_URL}/chat/completions"
-    else:
-        payload["format"] = "json"
-        url = f"{OLLAMA_URL}/api/chat"
+        payload = {
+            "model": OLLAMA_MODEL,
+            "messages": [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": req.description},
+            ],
+            "stream": False,
+        }
 
-    try:
-        async with httpx.AsyncClient(timeout=120) as client:
-            r = await client.post(url, json=payload, headers=headers)
-            r.raise_for_status()
-    except httpx.HTTPStatusError as e:
-        raise HTTPException(status_code=e.response.status_code, detail=f"AI API Error: {e.response.text}")
-    except httpx.ConnectError:
-        raise HTTPException(status_code=503, detail="Cannot connect to AI. Make sure it is running.")
-    except httpx.TimeoutException:
-        raise HTTPException(status_code=504, detail="AI timed out. The model may still be loading.")
+        if API_KEY:
+            payload["response_format"] = {"type": "json_object"}
+            url = f"{OLLAMA_URL}/chat/completions"
+        else:
+            payload["format"] = "json"
+            url = f"{OLLAMA_URL}/api/chat"
 
-    data = r.json()
-    if API_KEY:
-        raw_text = data.get("choices", [{}])[0].get("message", {}).get("content", "")
-    else:
-        raw_text = data.get("message", {}).get("content", "")
+        try:
+            async with httpx.AsyncClient(timeout=120) as client:
+                r = await client.post(url, json=payload, headers=headers)
+                r.raise_for_status()
+        except httpx.HTTPStatusError as e:
+            raise HTTPException(status_code=e.response.status_code, detail=f"AI API Error: {e.response.text}")
+        except httpx.ConnectError:
+            raise HTTPException(status_code=503, detail="Cannot connect to AI. Make sure it is running.")
+        except httpx.TimeoutException:
+            raise HTTPException(status_code=504, detail="AI timed out. The model may still be loading.")
 
-    # Try to extract JSON even if there's surrounding text
-    json_match = re.search(r'\{.*\}', raw_text, re.DOTALL)
-    if not json_match:
-        raise HTTPException(status_code=500, detail=f"Could not parse model response: {raw_text[:200]}")
+        data = r.json()
+        if API_KEY:
+            raw_text = data.get("choices", [{}])[0].get("message", {}).get("content", "")
+        else:
+            raw_text = data.get("message", {}).get("content", "")
 
-    try:
+        json_match = re.search(r'\{.*\}', raw_text, re.DOTALL)
+        if not json_match:
+            raise HTTPException(status_code=500, detail=f"Could not parse model response: {raw_text[:200]}")
+
         parsed = json.loads(json_match.group())
         ai_games = parsed.get("games", [])
         games_out = []
@@ -297,13 +321,17 @@ async def recommend(req: GameRequest):
                     why=g.get('why', ''),
                     platform=db_game['platform'] or g.get('platform', '')
                 ))
-            # If the AI hallucinates a game entirely, we simply ignore it to prevent rendering fake data.
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to parse game list: {str(e)}")
 
-    try:
-        await log_search(req.description, [g.title for g in games_out])
-    except Exception:
-        pass
+        try:
+            await log_search(req.description, [g.title for g in games_out])
+        except Exception as log_err:
+            print(f"Search log error: {log_err}")
 
-    return GameResponse(games=games_out, raw=raw_text)
+        return GameResponse(games=games_out, raw=raw_text)
+
+    except HTTPException:
+        raise
+    except Exception as general_err:
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"Server completely crashed: {str(general_err)}")
