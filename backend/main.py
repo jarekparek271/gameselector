@@ -28,20 +28,8 @@ async def lifespan(app):
         except Exception as seeder_err:
             print(f"Error seeding DB: {seeder_err}")
             
-        try:
-            missing_embeds = await db_pool.fetch("SELECT id, title, description FROM games WHERE embedding IS NULL")
-            if missing_embeds:
-                print(f"Generating embeddings for {len(missing_embeds)} games using bge-m3...")
-                for row in missing_embeds:
-                    text_to_embed = f"Title: {row['title']}. Description: {row['description'] or ''}"
-                    try:
-                        emb = await get_embedding(text_to_embed)
-                        await db_pool.execute("UPDATE games SET embedding = $1::vector WHERE id = $2", str(emb), row['id'])
-                    except Exception as emb_inner_err:
-                        print(f"Failed embedding for game {row['id']}: {emb_inner_err}")
-                print("Embeddings generation complete.")
-        except Exception as emb_err:
-            print(f"Error generating embeddings: {emb_err}")
+        import asyncio
+        asyncio.create_task(generate_missing_embeddings())
             
     except Exception as e:
         print(f"Warning: Could not connect to DB. Running without database. Error: {e}")
@@ -59,6 +47,24 @@ async def get_embedding(text: str) -> list[float]:
         r = await client.post(url, json=payload, headers=headers)
         r.raise_for_status()
         return r.json()["data"][0]["embedding"]
+
+async def generate_missing_embeddings():
+    if not db_pool:
+        return
+    try:
+        missing_embeds = await db_pool.fetch("SELECT id, title, description FROM games WHERE embedding IS NULL")
+        if missing_embeds:
+            print(f"Generating embeddings for {len(missing_embeds)} games using bge-m3...")
+            for row in missing_embeds:
+                text_to_embed = f"Title: {row['title']}. Description: {row['description'] or ''}"
+                try:
+                    emb = await get_embedding(text_to_embed)
+                    await db_pool.execute("UPDATE games SET embedding = $1::vector WHERE id = $2", str(emb), row['id'])
+                except Exception as emb_inner_err:
+                    print(f"Failed embedding for game {row['id']}: {emb_inner_err}")
+            print("Embeddings generation complete.")
+    except Exception as emb_err:
+        print(f"Error generating embeddings: {emb_err}")
 
 app = FastAPI(title="Game Picker API", lifespan=lifespan)
 
