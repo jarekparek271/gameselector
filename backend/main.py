@@ -21,26 +21,31 @@ async def lifespan(app):
     try:
         db_pool = await asyncpg.create_pool(DATABASE_URL, min_size=2, max_size=10, timeout=5)
         try:
-            init_file = "db/init.sql" if os.path.exists("db/init.sql") else "../db/init.sql"
-            if os.path.exists(init_file):
-                with open(init_file, "r", encoding="utf-8") as f:
-                    await db_pool.execute(f.read())
-        except Exception as seeder_err:
-            print(f"Error seeding DB from file: {seeder_err}")
-
-        # Safe programmatic migrations in case init.sql failed
-        try:
-            await db_pool.execute("ALTER TABLE games ADD COLUMN IF NOT EXISTS description TEXT;")
+            # 1. ALWAYS CREATE TABLES SAFELY First
             await db_pool.execute("""
+                CREATE EXTENSION IF NOT EXISTS vector;
+                CREATE TABLE IF NOT EXISTS genres (id SERIAL PRIMARY KEY, name VARCHAR(100) NOT NULL UNIQUE);
+                CREATE TABLE IF NOT EXISTS tags (id SERIAL PRIMARY KEY, name VARCHAR(100) NOT NULL UNIQUE);
+                CREATE TABLE IF NOT EXISTS games (
+                    id SERIAL PRIMARY KEY, title VARCHAR(200) NOT NULL UNIQUE,
+                    developer VARCHAR(200), publisher VARCHAR(200), release_year INT,
+                    platform VARCHAR(100), rating NUMERIC(3,1), price_usd NUMERIC(6,2),
+                    description TEXT, embedding VECTOR(1024)
+                );
+                CREATE TABLE IF NOT EXISTS game_genres (
+                    game_id INT REFERENCES games(id) ON DELETE CASCADE,
+                    genre_id INT REFERENCES genres(id) ON DELETE CASCADE,
+                    PRIMARY KEY (game_id, genre_id)
+                );
+                CREATE TABLE IF NOT EXISTS game_tags (
+                    game_id INT REFERENCES games(id) ON DELETE CASCADE,
+                    tag_id INT REFERENCES tags(id) ON DELETE CASCADE,
+                    PRIMARY KEY (game_id, tag_id)
+                );
                 CREATE TABLE IF NOT EXISTS search_log (
-                    id SERIAL PRIMARY KEY,
-                    query TEXT NOT NULL,
-                    result_titles TEXT[],
+                    id SERIAL PRIMARY KEY, query TEXT NOT NULL, result_titles TEXT[],
                     searched_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 );
-            """)
-            await db_pool.execute("DROP VIEW IF EXISTS v_games_full;")
-            await db_pool.execute("""
                 CREATE OR REPLACE VIEW v_games_full AS
                 SELECT g.id, g.title, g.developer, g.publisher, g.release_year, g.platform, g.rating, g.price_usd, g.description,
                     STRING_AGG(DISTINCT gn.name, ', ' ORDER BY gn.name) AS genres,
@@ -52,8 +57,42 @@ async def lifespan(app):
                 LEFT JOIN tags t ON gt.tag_id = t.id
                 GROUP BY g.id ORDER BY g.rating DESC, g.title;
             """)
-        except Exception as mig_err:
-            print(f"Error applying safe migrations: {mig_err}")
+
+            # 2. SEED FROM JSON IF EMPTY OR NEW GAMES FOUND
+            json_file = "db/games.json" if os.path.exists("db/games.json") else "../db/games.json"
+            if os.path.exists(json_file):
+                with open(json_file, "r", encoding="utf-8") as f:
+                    games_data = json.load(f)
+                    
+                for g in games_data:
+                    # Insert game
+                    await db_pool.execute('''
+                        INSERT INTO games (title, developer, publisher, release_year, platform, rating, price_usd, description)
+                        VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+                        ON CONFLICT (title) DO NOTHING
+                    ''', g["title"], g["developer"], g["publisher"], g["release_year"], g["platform"], float(g["rating"]), float(g["price_usd"]), g["description"])
+                    
+                    # Insert genres
+                    for genre in g.get("genres", []):
+                        await db_pool.execute("INSERT INTO genres (name) VALUES ($1) ON CONFLICT (name) DO NOTHING", genre)
+                        await db_pool.execute('''
+                            INSERT INTO game_genres (game_id, genre_id)
+                            SELECT games.id, genres.id FROM games, genres
+                            WHERE games.title = $1 AND genres.name = $2
+                            ON CONFLICT DO NOTHING
+                        ''', g["title"], genre)
+                        
+                    # Insert tags
+                    for tag in g.get("tags", []):
+                        await db_pool.execute("INSERT INTO tags (name) VALUES ($1) ON CONFLICT (name) DO NOTHING", tag)
+                        await db_pool.execute('''
+                            INSERT INTO game_tags (game_id, tag_id)
+                            SELECT games.id, tags.id FROM games, tags
+                            WHERE games.title = $1 AND tags.name = $2
+                            ON CONFLICT DO NOTHING
+                        ''', g["title"], tag)
+        except Exception as seeder_err:
+            print(f"Error seeding DB: {seeder_err}")
             
         import asyncio
         asyncio.create_task(generate_missing_embeddings())
