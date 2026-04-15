@@ -297,8 +297,7 @@ async def recommend(req: GameRequest):
                     why=g.get('why', ''),
                     platform=db_game['platform'] or g.get('platform', '')
                 ))
-            else:
-                games_out.append(Game(**g))
+            # If the AI hallucinates a game entirely, we simply ignore it to prevent rendering fake data.
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to parse game list: {str(e)}")
 
