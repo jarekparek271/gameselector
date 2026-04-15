@@ -478,6 +478,7 @@ SELECT
     g.platform,
     g.rating,
     g.price_usd,
+    g.description,
     STRING_AGG(DISTINCT gn.name, ', ' ORDER BY gn.name) AS genres,
     STRING_AGG(DISTINCT t.name,  ', ' ORDER BY t.name)  AS tags
 FROM games g
@@ -523,3 +524,13 @@ ORDER BY gn.name, g.rating DESC;
 
 -- 6. Games released between two years:
 --    SELECT title, release_year, rating FROM games WHERE release_year BETWEEN 2020 AND 2024 ORDER BY rating DESC;
+
+-- ============================================================
+--  LOGGING
+-- ============================================================
+CREATE TABLE IF NOT EXISTS search_log (
+    id SERIAL PRIMARY KEY,
+    query TEXT NOT NULL,
+    result_titles TEXT[],
+    searched_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
