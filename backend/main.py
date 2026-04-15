@@ -244,6 +244,7 @@ async def search_history(limit: int = 20):
     return [dict(r) for r in rows]
 
 @app.post("/recommend", response_model=GameResponse)
+async def recommend(req: GameRequest):
     try:
         if not req.description.strip():
             raise HTTPException(status_code=400, detail="Description cannot be empty")
