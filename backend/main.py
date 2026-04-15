@@ -285,7 +285,20 @@ async def recommend(req: GameRequest):
 
     try:
         parsed = json.loads(json_match.group())
-        games_out = [Game(**g) for g in parsed.get("games", [])]
+        ai_games = parsed.get("games", [])
+        games_out = []
+        for g in ai_games:
+            title = g.get('title', '')
+            db_game = next((db_g for db_g in games_db if db_g['title'].lower() == title.lower()), None)
+            if db_game:
+                games_out.append(Game(
+                    title=db_game['title'],
+                    genre=db_game['genre'] or g.get('genre', ''),
+                    why=g.get('why', ''),
+                    platform=db_game['platform'] or g.get('platform', '')
+                ))
+            else:
+                games_out.append(Game(**g))
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to parse game list: {str(e)}")
 
