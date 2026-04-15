@@ -468,6 +468,7 @@ SELECT g.id, t.id FROM games g, tags t WHERE
 -- ============================================================
 
 -- Full game listing with genres and tags
+DROP VIEW IF EXISTS v_games_full;
 CREATE OR REPLACE VIEW v_games_full AS
 SELECT
     g.id,
