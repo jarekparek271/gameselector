@@ -304,7 +304,13 @@ async def recommend(req: GameRequest):
         if len(games_db) < 15 and db_pool is not None:
             words = [w for w in req.description.replace(',', ' ').split() if len(w) > 3][:6]
             where_clauses = " OR ".join([f"v.description ILIKE '%{w}%' OR v.genres ILIKE '%{w}%' OR v.tags ILIKE '%{w}%'" for w in words])
-            query = "SELECT * FROM v_games_full v "
+            
+            query = """
+                SELECT v.id, v.title, v.genres AS genre, v.platform,
+                       v.release_year, v.description,
+                       COALESCE(string_to_array(v.tags, ', '), '{}') AS tags
+                FROM v_games_full v 
+            """
             if where_clauses:
                 query += f"WHERE {where_clauses} "
             query += "ORDER BY RANDOM() LIMIT 20"
