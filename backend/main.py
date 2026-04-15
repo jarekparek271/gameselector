@@ -108,7 +108,8 @@ async def get_embedding(text: str) -> list[float]:
     API_KEY = os.getenv("OPENAI_API_KEY", os.getenv("TEACHER_API_KEY", ""))
     headers = {"Authorization": f"Bearer {API_KEY}"} if API_KEY else {}
     url = f"{OLLAMA_URL}/v1/embeddings"
-    payload = {"model": "bge-m3", "input": text}
+    model = os.getenv("EMBEDDING_MODEL", "text-embedding-3-small" if API_KEY else "nomic-embed-text")
+    payload = {"model": model, "input": text}
     async with httpx.AsyncClient(timeout=30) as client:
         r = await client.post(url, json=payload, headers=headers)
         r.raise_for_status()
@@ -172,6 +173,7 @@ async def fetch_similar_games(embedding: list[float], limit: int = 15):
                COALESCE(string_to_array(v.tags, ', '), '{}') AS tags
         FROM v_games_full v
         JOIN games g ON g.id = v.id
+        WHERE g.embedding IS NOT NULL
         ORDER BY g.embedding <=> $1::vector
         LIMIT $2
     """, str(embedding), limit)
@@ -294,13 +296,28 @@ async def recommend(req: GameRequest):
         except Exception as e:
             print(f"Failed to match embeddings, using catalog fallback: {e}")
 
+        games_db = []
         if query_emb:
             games_db = await fetch_similar_games(query_emb, limit=15)
-        else:
-            if not db_pool:
-                raise HTTPException(status_code=503, detail="Database not connected.")
-            rows = await db_pool.fetch("SELECT v.id, v.title, v.genres AS genre, v.platform, v.release_year, v.description, COALESCE(string_to_array(v.tags, ', '), '{}') AS tags FROM v_games_full v LIMIT 15")
-            games_db = [dict(r) for r in rows]
+            
+        # Robust Hybrid Fallback: If embeddings are missing/broken, backfill with text search
+        if len(games_db) < 15 and db_pool is not None:
+            words = [w for w in req.description.replace(',', ' ').split() if len(w) > 3][:6]
+            where_clauses = " OR ".join([f"v.description ILIKE '%{w}%' OR v.genres ILIKE '%{w}%' OR v.tags ILIKE '%{w}%'" for w in words])
+            query = "SELECT * FROM v_games_full v "
+            if where_clauses:
+                query += f"WHERE {where_clauses} "
+            query += "ORDER BY RANDOM() LIMIT 20"
+            
+            try:
+                rows = await db_pool.fetch(query)
+                existing_ids = {g['id'] for g in games_db}
+                for r in rows:
+                    if r['id'] not in existing_ids:
+                        games_db.append(dict(r))
+                        existing_ids.add(r['id'])
+            except Exception as search_err:
+                print(f"Keyword search fallback failed: {search_err}")
 
         if not games_db and db_pool is not None:
             raise HTTPException(status_code=503, detail="Game catalog is empty — DB may not be seeded yet.")
