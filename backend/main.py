@@ -27,12 +27,38 @@ async def lifespan(app):
                     await db_pool.execute(f.read())
         except Exception as seeder_err:
             print(f"Error seeding DB: {seeder_err}")
+            
+        try:
+            missing_embeds = await db_pool.fetch("SELECT id, title, description FROM games WHERE embedding IS NULL")
+            if missing_embeds:
+                print(f"Generating embeddings for {len(missing_embeds)} games using bge-m3...")
+                for row in missing_embeds:
+                    text_to_embed = f"Title: {row['title']}. Description: {row['description'] or ''}"
+                    try:
+                        emb = await get_embedding(text_to_embed)
+                        await db_pool.execute("UPDATE games SET embedding = $1::vector WHERE id = $2", str(emb), row['id'])
+                    except Exception as emb_inner_err:
+                        print(f"Failed embedding for game {row['id']}: {emb_inner_err}")
+                print("Embeddings generation complete.")
+        except Exception as emb_err:
+            print(f"Error generating embeddings: {emb_err}")
+            
     except Exception as e:
         print(f"Warning: Could not connect to DB. Running without database. Error: {e}")
         db_pool = None
     yield
     if db_pool:
         await db_pool.close()
+
+async def get_embedding(text: str) -> list[float]:
+    API_KEY = os.getenv("OPENAI_API_KEY", os.getenv("TEACHER_API_KEY", ""))
+    headers = {"Authorization": f"Bearer {API_KEY}"} if API_KEY else {}
+    url = f"{OLLAMA_URL}/v1/embeddings"
+    payload = {"model": "bge-m3", "input": text}
+    async with httpx.AsyncClient(timeout=30) as client:
+        r = await client.post(url, json=payload, headers=headers)
+        r.raise_for_status()
+        return r.json()["data"][0]["embedding"]
 
 app = FastAPI(title="Game Picker API", lifespan=lifespan)
 
@@ -65,20 +91,18 @@ class DBGame(BaseModel):
     description: str | None
     tags: list[str]
 
-async def fetch_all_games():
+async def fetch_similar_games(embedding: list[float], limit: int = 15):
     if not db_pool:
         return []
     rows = await db_pool.fetch("""
-        SELECT g.id, g.title, gr.name AS genre, g.platform,
-               g.release_year, g.description,
-               COALESCE(array_agg(t.name ORDER BY t.name)
-                        FILTER (WHERE t.name IS NOT NULL), '{}') AS tags
-        FROM games g
-        JOIN genres gr ON gr.id = g.genre_id
-        LEFT JOIN game_tags gt ON gt.game_id = g.id
-        LEFT JOIN tags t       ON t.id = gt.tag_id
-        GROUP BY g.id, gr.name ORDER BY g.title
-    """)
+        SELECT v.id, v.title, v.genres AS genre, v.platform,
+               v.release_year, v.description,
+               COALESCE(string_to_array(v.tags, ', '), '{}') AS tags
+        FROM v_games_full v
+        JOIN games g ON g.id = v.id
+        ORDER BY g.embedding <=> $1::vector
+        LIMIT $2
+    """, str(embedding), limit)
     return [dict(r) for r in rows]
 
 async def log_search(description: str, results: list):
@@ -152,20 +176,13 @@ async def list_games(genre: str | None = None, tag: str | None = None):
     if not db_pool:
         return []
     rows = await db_pool.fetch("""
-        SELECT g.id, g.title, gr.name AS genre, g.platform,
-               g.release_year, g.description,
-               COALESCE(array_agg(t.name ORDER BY t.name)
-                        FILTER (WHERE t.name IS NOT NULL), '{}') AS tags
-        FROM games g
-        JOIN genres gr ON gr.id = g.genre_id
-        LEFT JOIN game_tags gt ON gt.game_id = g.id
-        LEFT JOIN tags t       ON t.id = gt.tag_id
-        WHERE ($1::text IS NULL OR lower(gr.name) = lower($1))
-          AND ($2::text IS NULL OR g.id IN (
-                SELECT gt2.game_id FROM game_tags gt2
-                JOIN tags t2 ON t2.id = gt2.tag_id
-                WHERE lower(t2.name) = lower($2)))
-        GROUP BY g.id, gr.name ORDER BY g.title
+        SELECT v.id, v.title, v.genres AS genre, v.platform,
+               v.release_year, v.description,
+               COALESCE(string_to_array(v.tags, ', '), '{}') AS tags
+        FROM v_games_full v
+        WHERE ($1::text IS NULL OR lower(v.genres) LIKE '%' || lower($1) || '%')
+          AND ($2::text IS NULL OR lower(v.tags) LIKE '%' || lower($2) || '%')
+        ORDER BY v.title
     """, genre, tag)
     return [DBGame(**dict(r)) for r in rows]
 
@@ -198,7 +215,21 @@ async def recommend(req: GameRequest):
     if not req.description.strip():
         raise HTTPException(status_code=400, detail="Description cannot be empty")
 
-    games_db = await fetch_all_games()
+    query_emb = []
+    try:
+        query_emb = await get_embedding(req.description)
+    except Exception as e:
+        print(f"Failed to match embeddings, using catalog fallback: {e}")
+
+    if query_emb:
+        games_db = await fetch_similar_games(query_emb, limit=15)
+    else:
+        # Fallback if embeddings somehow fail
+        if not db_pool:
+            raise HTTPException(status_code=503, detail="Database not connected.")
+        rows = await db_pool.fetch("SELECT v.id, v.title, v.genres AS genre, v.platform, v.release_year, v.description, COALESCE(string_to_array(v.tags, ', '), '{}') AS tags FROM v_games_full v LIMIT 15")
+        games_db = [dict(r) for r in rows]
+
     if not games_db and db_pool is not None:
         raise HTTPException(status_code=503, detail="Game catalog is empty — DB may not be seeded yet.")
 
